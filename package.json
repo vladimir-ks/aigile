@@ -20,14 +20,14 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/vladimir-ks/aigile.git"
+    "url": "git+https://github.com/vladimir-ks/aigile.git"
   },
   "type": "module",
   "main": "./dist/index.js",
   "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "bin": {
-    "aigile": "./dist/bin/aigile.js"
+    "aigile": "dist/bin/aigile.js"
   },
   "exports": {
     ".": {
