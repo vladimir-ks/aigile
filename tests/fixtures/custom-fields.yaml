@@ -1,0 +1,95 @@
+# Sample Custom Field Definitions for Tests
+#
+# Author: Vladimir K.S.
+
+version: 1
+entity: epic
+
+fields:
+  - name: business_value
+    label: "Business Value"
+    type: number
+    required: false
+    default: 0
+    description: "Estimated business value on 0-100 scale"
+    validation:
+      min: 0
+      max: 100
+      integer: true
+
+  - name: department
+    label: "Department"
+    type: select
+    required: true
+    default: "Engineering"
+    validation:
+      options:
+        - Engineering
+        - Product
+        - Marketing
+        - Operations
+        - Finance
+
+  - name: risk_level
+    label: "Risk Level"
+    type: select
+    default: "Medium"
+    validation:
+      options:
+        - Low
+        - Medium
+        - High
+        - Critical
+
+  - name: stakeholders
+    label: "Key Stakeholders"
+    type: multi_select
+    default: []
+    validation:
+      options:
+        - CEO
+        - CTO
+        - Product Lead
+        - Engineering Lead
+        - Customer Success
+      min_selections: 0
+      max_selections: 5
+
+  - name: compliance_required
+    label: "Compliance Required"
+    type: boolean
+    default: false
+    description: "Does this epic have regulatory/compliance requirements?"
+
+  - name: design_spec
+    label: "Design Specification"
+    type: url
+    description: "Link to Figma/design document"
+    validation:
+      protocols: ["https", "http"]
+
+  - name: target_revenue_impact
+    label: "Target Revenue Impact"
+    type: number
+    description: "Expected revenue impact in USD"
+    validation:
+      min: 0
+      integer: false
+
+  - name: technical_notes
+    label: "Technical Notes"
+    type: text
+    description: "Internal technical documentation"
+    validation:
+      max_length: 10000
+      multiline: true
+
+  - name: review_date
+    label: "Review Date"
+    type: date
+    description: "Scheduled review date"
+
+  - name: extra_config
+    label: "Extra Configuration"
+    type: json
+    description: "Freeform JSON configuration"

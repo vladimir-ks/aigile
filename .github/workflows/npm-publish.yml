@@ -1,0 +1,178 @@
+name: NPM Publish
+
+on:
+  push:
+    branches:
+      - staging  # Alpha releases
+      - main
+      - master   # Production releases
+    tags:
+      - 'v*'     # Version tags (v0.1.0, v1.0.0, etc.)
+
+# Permissions for OIDC authentication (Trusted Publishing)
+permissions:
+  id-token: write   # Required for npm OIDC authentication
+  contents: write   # Required for checkout and releases
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Upgrade npm to latest (required for OIDC Trusted Publishing)
+        run: |
+          echo "Current npm version: $(npm --version)"
+          npm install -g npm@latest
+          echo "Upgraded npm version: $(npm --version)"
+
+      - name: Configure npm registry
+        run: |
+          npm config set registry https://registry.npmjs.org/
+          npm config delete //registry.npmjs.org/:_authToken || true
+          npm config delete //registry.npmjs.org/:_auth || true
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+      - name: Validate package
+        run: npm pack --dry-run
+
+      - name: Determine release type
+        id: release-type
+        run: |
+          BRANCH_NAME=${GITHUB_REF#refs/heads/}
+
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            # Tag push - check if alpha or production
+            if [[ "$GITHUB_REF" == *"-alpha"* || "$GITHUB_REF" == *"-beta"* ]]; then
+              echo "type=alpha" >> $GITHUB_OUTPUT
+              echo "tag=alpha" >> $GITHUB_OUTPUT
+              echo "is_alpha=true" >> $GITHUB_OUTPUT
+            else
+              echo "type=production" >> $GITHUB_OUTPUT
+              echo "tag=latest" >> $GITHUB_OUTPUT
+              echo "is_alpha=false" >> $GITHUB_OUTPUT
+            fi
+          elif [[ "$BRANCH_NAME" == "staging" ]]; then
+            echo "type=alpha" >> $GITHUB_OUTPUT
+            echo "tag=alpha" >> $GITHUB_OUTPUT
+            echo "is_alpha=true" >> $GITHUB_OUTPUT
+          else
+            echo "type=production" >> $GITHUB_OUTPUT
+            echo "tag=latest" >> $GITHUB_OUTPUT
+            echo "is_alpha=false" >> $GITHUB_OUTPUT
+          fi
+
+          echo "Release type: $(cat $GITHUB_OUTPUT | grep type= | cut -d= -f2)"
+          echo "NPM tag: $(cat $GITHUB_OUTPUT | grep tag= | cut -d= -f2)"
+
+      - name: Get package version
+        id: package-version
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Package version: $VERSION"
+
+      - name: Validate version (if triggered by tag)
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          TAG_VERSION=${GITHUB_REF#refs/tags/v}
+          PACKAGE_VERSION="${{ steps.package-version.outputs.version }}"
+
+          if [ "$TAG_VERSION" != "$PACKAGE_VERSION" ]; then
+            echo "❌ ERROR: Tag version ($TAG_VERSION) does not match package.json ($PACKAGE_VERSION)"
+            exit 1
+          fi
+
+          echo "✅ Version validation passed"
+
+      - name: Check if version already published
+        id: check-published
+        run: |
+          VERSION="${{ steps.package-version.outputs.version }}"
+          echo "Checking if version $VERSION is already published..."
+
+          if npm view "@vladimir-ks/aigile@$VERSION" version 2>/dev/null; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+            echo "⚠️  Version $VERSION already published to NPM"
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+            echo "✅ Version $VERSION not yet published"
+          fi
+
+      - name: Verify OIDC setup
+        if: steps.check-published.outputs.exists == 'false'
+        run: |
+          if [ -n "$ACTIONS_ID_TOKEN_REQUEST_TOKEN" ] && [ -n "$ACTIONS_ID_TOKEN_REQUEST_URL" ]; then
+            echo "✅ OIDC environment ready for Trusted Publishing"
+          else
+            echo "⚠️  OIDC environment variables not found - Trusted Publishing may not work"
+            exit 1
+          fi
+
+      - name: Publish to NPM
+        if: steps.check-published.outputs.exists == 'false'
+        run: npm publish --tag ${{ steps.release-type.outputs.tag }} --access public
+
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/') && steps.check-published.outputs.exists == 'false' && steps.release-type.outputs.is_alpha == 'false'
+        uses: softprops/action-gh-release@v1
+        with:
+          name: 'AIGILE v${{ steps.package-version.outputs.version }}'
+          body: |
+            # AIGILE v${{ steps.package-version.outputs.version }}
+
+            ## Installation
+
+            ```bash
+            npm install -g @vladimir-ks/aigile
+            ```
+
+            ## What's Changed
+
+            See [CHANGELOG.md](https://github.com/${{ github.repository }}/blob/main/CHANGELOG.md) for full details.
+
+            ## Links
+
+            - **NPM Package**: https://www.npmjs.com/package/@vladimir-ks/aigile
+            - **Documentation**: https://github.com/${{ github.repository }}
+            - **Issues**: https://github.com/${{ github.repository }}/issues
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Summary
+        run: |
+          if [ "${{ steps.check-published.outputs.exists }}" == "true" ]; then
+            echo "ℹ️  Version already published, skipping NPM publish"
+          else
+            if [ "${{ steps.release-type.outputs.is_alpha }}" == "true" ]; then
+              echo "✅ Alpha version published!"
+              echo "📦 Version: ${{ steps.package-version.outputs.version }}"
+              echo "🚀 Install with: npm install @vladimir-ks/aigile@alpha"
+            else
+              echo "✅ Production release published!"
+              echo "📦 Version: ${{ steps.package-version.outputs.version }}"
+              echo "🚀 Install with: npm install -g @vladimir-ks/aigile"
+            fi
+            echo "🔗 NPM: https://www.npmjs.com/package/@vladimir-ks/aigile"
+          fi
