@@ -11,6 +11,7 @@ import { queryAll, queryOne, run, generateId, getNextKey } from '../db/connectio
 import {
   success,
   error,
+  warning,
   data,
   details,
   getOutputOptions
@@ -269,15 +270,42 @@ storyCommand
   .command('delete')
   .alias('rm')
   .argument('<key>', 'Story key')
-  .option('--force', 'Delete without confirmation')
+  .option('--force', 'Delete and orphan child tasks')
+  .option('--cascade', 'Delete with all child tasks')
   .description('Delete story')
-  .action((key: string) => {
+  .action((key: string, options: { force?: boolean; cascade?: boolean }) => {
     const opts = getOutputOptions(storyCommand);
 
-    const story = queryOne('SELECT id FROM user_stories WHERE key = ?', [key]);
+    const story = queryOne<{ id: string }>('SELECT id FROM user_stories WHERE key = ?', [key]);
     if (!story) {
       error(`Story "${key}" not found.`, opts);
       process.exit(1);
+    }
+
+    // Check for child tasks
+    const childCount = queryOne<{ count: number }>(
+      'SELECT COUNT(*) as count FROM tasks WHERE story_id = ?',
+      [story.id]
+    );
+
+    if (childCount && childCount.count > 0) {
+      if (!options.force && !options.cascade) {
+        error(
+          `Cannot delete story "${key}": has ${childCount.count} child task(s). ` +
+          `Use --force to orphan children, or --cascade to delete them.`,
+          opts
+        );
+        process.exit(1);
+      }
+
+      if (options.cascade) {
+        warning(`Deleting ${childCount.count} child task(s)`, opts);
+        run('DELETE FROM tasks WHERE story_id = ?', [story.id]);
+      } else {
+        // --force: orphan children
+        warning(`Orphaning ${childCount.count} child task(s)`, opts);
+        run('UPDATE tasks SET story_id = NULL WHERE story_id = ?', [story.id]);
+      }
     }
 
     run('DELETE FROM user_stories WHERE key = ?', [key]);

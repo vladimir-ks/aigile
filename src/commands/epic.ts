@@ -11,6 +11,7 @@ import { queryAll, queryOne, run, generateId, getNextKey } from '../db/connectio
 import {
   success,
   error,
+  warning,
   data,
   details,
   getOutputOptions
@@ -239,15 +240,56 @@ epicCommand
   .command('delete')
   .alias('rm')
   .argument('<key>', 'Epic key')
-  .option('--force', 'Delete without confirmation')
+  .option('--force', 'Delete and orphan child stories')
+  .option('--cascade', 'Delete with all child stories and their tasks')
   .description('Delete epic')
-  .action((key: string) => {
+  .action((key: string, options: { force?: boolean; cascade?: boolean }) => {
     const opts = getOutputOptions(epicCommand);
 
-    const epic = queryOne('SELECT id FROM epics WHERE key = ?', [key]);
+    const epic = queryOne<{ id: string }>('SELECT id FROM epics WHERE key = ?', [key]);
     if (!epic) {
       error(`Epic "${key}" not found.`, opts);
       process.exit(1);
+    }
+
+    // Check for child stories
+    const childCount = queryOne<{ count: number }>(
+      'SELECT COUNT(*) as count FROM user_stories WHERE epic_id = ?',
+      [epic.id]
+    );
+
+    if (childCount && childCount.count > 0) {
+      if (!options.force && !options.cascade) {
+        error(
+          `Cannot delete epic "${key}": has ${childCount.count} child story(s). ` +
+          `Use --force to orphan children, or --cascade to delete them.`,
+          opts
+        );
+        process.exit(1);
+      }
+
+      if (options.cascade) {
+        // Get task count for warning
+        const taskCount = queryOne<{ count: number }>(
+          `SELECT COUNT(*) as count FROM tasks WHERE story_id IN
+           (SELECT id FROM user_stories WHERE epic_id = ?)`,
+          [epic.id]
+        );
+        warning(
+          `Deleting ${childCount.count} child story(s) and ${taskCount?.count || 0} task(s)`,
+          opts
+        );
+        // Delete tasks first, then stories
+        run(
+          `DELETE FROM tasks WHERE story_id IN (SELECT id FROM user_stories WHERE epic_id = ?)`,
+          [epic.id]
+        );
+        run('DELETE FROM user_stories WHERE epic_id = ?', [epic.id]);
+      } else {
+        // --force: orphan children
+        warning(`Orphaning ${childCount.count} child story(s)`, opts);
+        run('UPDATE user_stories SET epic_id = NULL WHERE epic_id = ?', [epic.id]);
+      }
     }
 
     run('DELETE FROM epics WHERE key = ?', [key]);

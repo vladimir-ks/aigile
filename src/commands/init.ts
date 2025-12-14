@@ -99,6 +99,11 @@ function detectGitContext(targetPath: string): {
 }
 
 /**
+ * Valid profiles for AIGILE initialization
+ */
+const VALID_PROFILES: InitProfile[] = ['full-repo', 'subrepo', 'module'];
+
+/**
  * Determine profile based on context and options
  */
 function determineProfile(
@@ -106,8 +111,13 @@ function determineProfile(
   options: InitOptions,
   opts: OutputOptions
 ): InitProfile {
-  // If explicitly specified, use that
+  // If explicitly specified, validate and use that
   if (options.profile) {
+    if (!VALID_PROFILES.includes(options.profile)) {
+      throw new Error(
+        `Invalid profile "${options.profile}". Valid profiles: ${VALID_PROFILES.join(', ')}`
+      );
+    }
     return options.profile;
   }
 
@@ -159,6 +169,9 @@ function determineDbMode(
       // Modules always share parent DB
       const parentDbPath = findParentDb(context);
       return { mode: 'shared', path: parentDbPath };
+    default:
+      // Safety fallback - should never reach here due to validation
+      return { mode: 'local', path: '.aigile/aigile.db' };
   }
 }
 
