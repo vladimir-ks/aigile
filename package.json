@@ -1,6 +1,6 @@
 {
   "name": "@vladimir-ks/aigile",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "JIRA-compatible Agile project management CLI for AI-assisted development",
   "keywords": [
     "aigile",
