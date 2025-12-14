@@ -7,6 +7,8 @@
  * @author Vladimir K.S.
  */
 
+import { randomUUID } from 'crypto';
+
 /**
  * Common fields present in all AIGILE entities
  */
@@ -48,7 +50,7 @@ export abstract class BaseEntity implements BaseEntityFields {
   metadata: Record<string, unknown>;
 
   constructor(data: Partial<BaseEntityFields> = {}) {
-    this.id = data.id ?? crypto.randomUUID();
+    this.id = data.id ?? randomUUID();
     this.key = data.key ?? '';
     this.created_at = data.created_at ?? new Date().toISOString();
     this.updated_at = data.updated_at ?? new Date().toISOString();

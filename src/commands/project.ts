@@ -7,15 +7,26 @@
  */
 
 import { Command } from 'commander';
+import { existsSync } from 'fs';
+import { join } from 'path';
 import { queryAll, queryOne, run } from '../db/connection.js';
 import {
   success,
   error,
+  info,
+  warning,
   data,
   details,
   blank,
   getOutputOptions
 } from '../services/output-formatter.js';
+
+/**
+ * Check if a project path is valid (exists and has .aigile directory)
+ */
+function isValidProject(path: string): boolean {
+  return existsSync(path) && existsSync(join(path, '.aigile'));
+}
 
 export const projectCommand = new Command('project')
   .description('Manage registered projects');
@@ -24,7 +35,7 @@ export const projectCommand = new Command('project')
 projectCommand
   .command('list')
   .alias('ls')
-  .description('List all registered projects')
+  .description('List all registered projects with validity status')
   .action(() => {
     const opts = getOutputOptions(projectCommand);
 
@@ -50,15 +61,39 @@ projectCommand
       return;
     }
 
-    const formattedProjects = projects.map(p => ({
-      key: p.is_default ? `${p.key} *` : p.key,
-      name: p.name,
-      path: p.path
-    }));
+    // Add validity status to each project
+    const formattedProjects = projects.map(p => {
+      const valid = isValidProject(p.path);
+      return {
+        status: valid ? '✓' : '✗',
+        key: p.is_default ? `${p.key} *` : p.key,
+        name: p.name,
+        path: p.path,
+        valid  // For JSON output
+      };
+    });
+
+    const invalidCount = formattedProjects.filter(p => !p.valid).length;
+
+    if (opts.json) {
+      console.log(JSON.stringify({
+        success: true,
+        data: formattedProjects.map(p => ({
+          key: p.key.replace(' *', ''),
+          name: p.name,
+          path: p.path,
+          valid: p.valid,
+          is_default: p.key.includes('*')
+        })),
+        invalidCount
+      }));
+      return;
+    }
 
     data(
       formattedProjects,
       [
+        { header: '', key: 'status', width: 3 },
         { header: 'Key', key: 'key', width: 12 },
         { header: 'Name', key: 'name', width: 30 },
         { header: 'Path', key: 'path', width: 50 }
@@ -66,9 +101,13 @@ projectCommand
       opts
     );
 
-    if (!opts.json) {
+    blank();
+    console.log('  * = default project');
+    console.log('  ✓ = valid path, ✗ = missing/invalid path');
+
+    if (invalidCount > 0) {
       blank();
-      console.log('  * = default project');
+      warning(`${invalidCount} project(s) have invalid paths. Run "aigile project cleanup" to remove.`, opts);
     }
   });
 
@@ -131,18 +170,137 @@ projectCommand
   .command('remove')
   .alias('rm')
   .argument('<key>', 'Project key to remove')
+  .option('--cascade', 'Also delete all entities (epics, stories, tasks, etc.)')
   .option('--force', 'Remove without confirmation')
   .description('Remove project from registry (does not delete files)')
-  .action((key: string, options: { force?: boolean }) => {
+  .action((key: string, options: { cascade?: boolean; force?: boolean }) => {
     const opts = getOutputOptions(projectCommand);
 
-    const project = queryOne('SELECT id FROM projects WHERE key = ?', [key]);
+    const project = queryOne<{ id: string; name: string; path: string }>(
+      'SELECT id, name, path FROM projects WHERE key = ?',
+      [key]
+    );
 
     if (!project) {
       error(`Project "${key}" not found.`, opts);
       process.exit(1);
     }
 
+    if (options.cascade) {
+      // Delete all related entities
+      const tables = [
+        'documents',
+        'doc_comments',
+        'tasks',
+        'bugs',
+        'user_stories',
+        'epics',
+        'initiatives',
+        'sprints',
+        'components',
+        'versions',
+        'personas',
+        'ux_journeys',
+        'sessions',
+        'activity_log',
+        'key_sequences'
+      ];
+
+      for (const table of tables) {
+        try {
+          run(`DELETE FROM ${table} WHERE project_id = ?`, [project.id]);
+        } catch {
+          // Table might not have project_id or might not exist
+        }
+      }
+
+      info(`Deleted all entities for project "${key}".`, opts);
+    }
+
     run('DELETE FROM projects WHERE key = ?', [key]);
     success(`Project "${key}" removed from registry.`, opts);
+  });
+
+// Cleanup invalid projects
+projectCommand
+  .command('cleanup')
+  .description('Remove all projects with invalid/missing paths')
+  .option('--dry-run', 'Show what would be removed without removing')
+  .option('--cascade', 'Also delete all entities for removed projects')
+  .action((options: { dryRun?: boolean; cascade?: boolean }) => {
+    const opts = getOutputOptions(projectCommand);
+
+    const projects = queryAll<{
+      id: string;
+      key: string;
+      name: string;
+      path: string;
+    }>('SELECT id, key, name, path FROM projects');
+
+    const invalidProjects = projects.filter(p => !isValidProject(p.path));
+
+    if (invalidProjects.length === 0) {
+      success('All projects have valid paths. Nothing to clean up.', opts);
+      return;
+    }
+
+    if (opts.json) {
+      console.log(JSON.stringify({
+        success: true,
+        dryRun: options.dryRun ?? false,
+        invalidProjects: invalidProjects.map(p => ({
+          key: p.key,
+          name: p.name,
+          path: p.path
+        }))
+      }));
+
+      if (options.dryRun) {
+        return;
+      }
+    }
+
+    if (options.dryRun) {
+      info(`Would remove ${invalidProjects.length} invalid project(s):`, opts);
+      for (const p of invalidProjects) {
+        console.log(`  - ${p.key}: ${p.path}`);
+      }
+      return;
+    }
+
+    for (const project of invalidProjects) {
+      if (options.cascade) {
+        // Delete all related entities
+        const tables = [
+          'documents',
+          'doc_comments',
+          'tasks',
+          'bugs',
+          'user_stories',
+          'epics',
+          'initiatives',
+          'sprints',
+          'components',
+          'versions',
+          'personas',
+          'ux_journeys',
+          'sessions',
+          'activity_log',
+          'key_sequences'
+        ];
+
+        for (const table of tables) {
+          try {
+            run(`DELETE FROM ${table} WHERE project_id = ?`, [project.id]);
+          } catch {
+            // Table might not have project_id or might not exist
+          }
+        }
+      }
+
+      run('DELETE FROM projects WHERE id = ?', [project.id]);
+      info(`Removed: ${project.key} (${project.path})`, opts);
+    }
+
+    success(`Cleaned up ${invalidProjects.length} invalid project(s).`, opts);
   });

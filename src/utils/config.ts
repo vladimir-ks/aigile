@@ -10,6 +10,10 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
 import { homedir } from 'os';
 import { join } from 'path';
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
+import {
+  getDefaultAllowPatterns,
+  getDefaultDenyPatterns,
+} from '../config/monitoring-patterns.js';
 
 /**
  * Global configuration structure (~/.aigile/config.yaml)
@@ -203,4 +207,132 @@ export function findProjectRoot(startPath: string = process.cwd()): string | nul
   }
 
   return null;
+}
+
+/**
+ * Parse a gitignore-style file into glob patterns
+ */
+function parseIgnoreFile(filePath: string): string[] {
+  try {
+    const content = readFileSync(filePath, 'utf-8');
+    const patterns: string[] = [];
+
+    for (let line of content.split('\n')) {
+      line = line.trim();
+
+      // Skip empty lines and comments
+      if (!line || line.startsWith('#')) {
+        continue;
+      }
+
+      // Handle negation (not supported, skip)
+      if (line.startsWith('!')) {
+        continue;
+      }
+
+      // Convert gitignore patterns to glob patterns
+      let pattern = line;
+
+      // Remove leading slash (means relative to repo root)
+      if (pattern.startsWith('/')) {
+        pattern = pattern.slice(1);
+      }
+
+      // Add ** prefix for patterns that should match anywhere
+      if (!pattern.startsWith('**/') && !pattern.includes('/')) {
+        pattern = `**/${pattern}`;
+      }
+
+      // Add trailing /** for directory patterns
+      if (pattern.endsWith('/')) {
+        pattern = pattern.slice(0, -1) + '/**';
+      }
+
+      patterns.push(pattern);
+    }
+
+    return patterns;
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Load ignore patterns from .aigile/ignore file
+ * Returns default deny patterns if file doesn't exist
+ */
+export function loadIgnorePatterns(projectPath: string): string[] {
+  const ignorePath = join(projectPath, '.aigile', 'ignore');
+
+  if (!existsSync(ignorePath)) {
+    return getDefaultDenyPatterns();
+  }
+
+  const patterns = parseIgnoreFile(ignorePath);
+  return patterns.length > 0 ? patterns : getDefaultDenyPatterns();
+}
+
+/**
+ * Load allow patterns from .aigile/config.yaml sync.allow_patterns
+ * Returns default allow patterns if not configured
+ */
+export function loadAllowPatterns(projectPath: string): string[] {
+  const config = loadProjectConfig(projectPath);
+
+  if (!config) {
+    return getDefaultAllowPatterns();
+  }
+
+  // Check for allow_patterns in sync config (extended config)
+  const extendedConfig = config as ProjectConfig & {
+    sync?: {
+      allow_patterns?: string[];
+    };
+  };
+
+  if (extendedConfig.sync?.allow_patterns && extendedConfig.sync.allow_patterns.length > 0) {
+    return extendedConfig.sync.allow_patterns;
+  }
+
+  // Fall back to existing patterns field (backward compatibility)
+  if (config.sync?.patterns && config.sync.patterns.length > 0) {
+    return config.sync.patterns;
+  }
+
+  return getDefaultAllowPatterns();
+}
+
+/**
+ * Save ignore patterns to .aigile/ignore file
+ */
+export function saveIgnorePatterns(projectPath: string, patterns: string[]): void {
+  const aigileDir = join(projectPath, '.aigile');
+
+  if (!existsSync(aigileDir)) {
+    mkdirSync(aigileDir, { recursive: true });
+  }
+
+  const ignorePath = join(aigileDir, 'ignore');
+  const content = `# AIGILE Ignore File
+# Files matching these patterns will NOT be monitored by the daemon
+# Syntax is similar to .gitignore
+
+${patterns.join('\n')}
+`;
+
+  writeFileSync(ignorePath, content, 'utf-8');
+}
+
+/**
+ * Get the path to the ignore file
+ */
+export function getIgnoreFilePath(projectPath: string): string {
+  return join(projectPath, '.aigile', 'ignore');
+}
+
+/**
+ * Check if ignore file exists
+ */
+export function hasIgnoreFile(projectPath: string): boolean {
+  return existsSync(getIgnoreFilePath(projectPath));
 }

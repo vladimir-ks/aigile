@@ -10,6 +10,7 @@
 import initSqlJs, { Database as SqlJsDatabase } from 'sql.js';
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
 import { dirname } from 'path';
+import { randomUUID } from 'crypto';
 import { getDbPath, ensureAigileHome } from '../utils/config.js';
 
 let db: SqlJsDatabase | null = null;
@@ -60,12 +61,19 @@ export function getDatabase(): SqlJsDatabase {
 
 /**
  * Save database to file
+ * Guarded with try-catch to prevent crashes on I/O errors
  */
 export function saveDatabase(): void {
   if (db && dbPath) {
-    const data = db.export();
-    const buffer = Buffer.from(data);
-    writeFileSync(dbPath, buffer);
+    try {
+      const data = db.export();
+      const buffer = Buffer.from(data);
+      writeFileSync(dbPath, buffer);
+    } catch (err) {
+      // Log error but don't crash - database is still in memory
+      // Will retry on next save operation
+      console.error(`[${new Date().toISOString()}] Database save error: ${err}`);
+    }
   }
 }
 
@@ -370,6 +378,16 @@ function initializeSchema(database: SqlJsDatabase): void {
       meta_authors TEXT,
       has_frontmatter INTEGER DEFAULT 0,
       frontmatter_raw TEXT,
+      -- Shadow mode analysis fields
+      shadow_mode INTEGER DEFAULT 0,
+      analyzed_at TEXT,
+      analysis_confidence INTEGER,
+      file_type TEXT,
+      complexity_score INTEGER,
+      exports TEXT,
+      inferred_module TEXT,
+      inferred_component TEXT,
+      analysis_notes TEXT,
       created_at TEXT DEFAULT (datetime('now')),
       updated_at TEXT DEFAULT (datetime('now')),
       UNIQUE(project_id, path)
@@ -445,7 +463,7 @@ function initializeSchema(database: SqlJsDatabase): void {
  * Generate a UUID
  */
 export function generateId(): string {
-  return crypto.randomUUID();
+  return randomUUID();
 }
 
 /**
@@ -499,6 +517,20 @@ export function runMigrations(): void {
     { name: 'meta_authors', type: 'TEXT' },
     { name: 'has_frontmatter', type: 'INTEGER DEFAULT 0' },
     { name: 'frontmatter_raw', type: 'TEXT' },
+    // Shadow mode analysis columns
+    { name: 'shadow_mode', type: 'INTEGER DEFAULT 0' },
+    { name: 'analyzed_at', type: 'TEXT' },
+    { name: 'analysis_confidence', type: 'INTEGER' },
+    { name: 'file_type', type: 'TEXT' },
+    { name: 'complexity_score', type: 'INTEGER' },
+    { name: 'exports', type: 'TEXT' },
+    { name: 'inferred_module', type: 'TEXT' },
+    { name: 'inferred_component', type: 'TEXT' },
+    { name: 'analysis_notes', type: 'TEXT' },
+    // Tri-state monitoring columns
+    { name: 'monitoring_category', type: 'TEXT DEFAULT "unknown"' },
+    { name: 'needs_review', type: 'INTEGER DEFAULT 0' },
+    { name: 'reviewed_at', type: 'TEXT' },
   ];
 
   for (const col of newColumns) {
@@ -510,6 +542,35 @@ export function runMigrations(): void {
       }
     }
   }
+
+  // Create sessions table if missing (added after initial release)
+  database.run(`
+    CREATE TABLE IF NOT EXISTS sessions (
+      id TEXT PRIMARY KEY,
+      project_id TEXT REFERENCES projects(id),
+      started_at TEXT DEFAULT (datetime('now')),
+      ended_at TEXT,
+      summary TEXT,
+      entities_modified INTEGER DEFAULT 0,
+      files_modified INTEGER DEFAULT 0,
+      status TEXT DEFAULT 'active'
+    )
+  `);
+
+  // Create activity_log table if missing (added after initial release)
+  database.run(`
+    CREATE TABLE IF NOT EXISTS activity_log (
+      id TEXT PRIMARY KEY,
+      session_id TEXT REFERENCES sessions(id),
+      project_id TEXT REFERENCES projects(id),
+      entity_type TEXT NOT NULL,
+      entity_key TEXT NOT NULL,
+      action TEXT NOT NULL,
+      old_value TEXT,
+      new_value TEXT,
+      timestamp TEXT DEFAULT (datetime('now'))
+    )
+  `);
 
   saveDatabase();
 }
