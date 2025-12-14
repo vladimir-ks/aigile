@@ -41,6 +41,10 @@ syncCommand
   .option('--patterns <patterns>', 'Comma-separated glob patterns (e.g., "**/*.md,**/*.feature")')
   .option('--ignore <dirs>', 'Comma-separated directories to ignore')
   .option('--comments', 'Also parse and sync comments from files')
+  .option('--shadow', 'Shadow mode: track files without modifying them (for brownfield projects)')
+  .option('--track-all', 'Track all source files, not just docs (use with --shadow)')
+  .option('--include <patterns>', 'Additional patterns to include (e.g., "**/*.ts,**/*.js")')
+  .option('--exclude <patterns>', 'Additional patterns to exclude')
   .description('Scan repository files and sync to database')
   .action((options) => {
     const opts = getOutputOptions(syncCommand);
@@ -65,11 +69,44 @@ syncCommand
 
     // Build scan options
     const scanOptions: ScanOptions = {};
+
+    // Shadow mode with --track-all expands patterns to include source files
+    if (options.trackAll) {
+      // Track all common source files for brownfield analysis
+      scanOptions.patterns = [
+        '**/*.md', '**/*.feature', '**/*.yaml', '**/*.yml',
+        '**/*.ts', '**/*.tsx', '**/*.js', '**/*.jsx',
+        '**/*.py', '**/*.go', '**/*.rs', '**/*.java',
+        '**/*.css', '**/*.scss', '**/*.less',
+        '**/*.json', '**/*.toml',
+        '**/*.sql', '**/*.graphql'
+      ];
+    }
+
+    // Custom patterns override
     if (options.patterns) {
       scanOptions.patterns = options.patterns.split(',').map((p: string) => p.trim());
     }
+
+    // Add include patterns
+    if (options.include) {
+      const includePatterns = options.include.split(',').map((p: string) => p.trim());
+      scanOptions.patterns = [...(scanOptions.patterns ?? []), ...includePatterns];
+    }
+
+    // Handle ignore/exclude
     if (options.ignore) {
       scanOptions.ignore = options.ignore.split(',').map((d: string) => d.trim());
+    }
+    if (options.exclude) {
+      const excludePatterns = options.exclude.split(',').map((d: string) => d.trim());
+      scanOptions.ignore = [...(scanOptions.ignore ?? []), ...excludePatterns];
+    }
+
+    // Log shadow mode
+    const isShadowMode = options.shadow || options.trackAll;
+    if (isShadowMode) {
+      info('Shadow mode: tracking files without modification', opts);
     }
 
     // Scan files
@@ -107,10 +144,18 @@ syncCommand
       }
     }
 
+    // Calculate file type breakdown for shadow mode
+    const fileTypeBreakdown: Record<string, number> = {};
+    for (const file of files) {
+      const ext = file.extension || 'other';
+      fileTypeBreakdown[ext] = (fileTypeBreakdown[ext] || 0) + 1;
+    }
+
     if (opts.json) {
       console.log(JSON.stringify({
         success: true,
         data: {
+          shadowMode: isShadowMode,
           files: {
             total: result.total,
             new: result.new,
@@ -118,6 +163,7 @@ syncCommand
             deleted: result.deleted,
             unchanged: result.unchanged
           },
+          breakdown: isShadowMode ? fileTypeBreakdown : undefined,
           comments: options.comments ? commentStats : undefined
         }
       }));
@@ -129,6 +175,12 @@ syncCommand
       console.log(`  Unchanged: ${result.unchanged}`);
       if (options.comments) {
         console.log(`  Comments:  ${commentStats.new} new, ${commentStats.resolved} resolved`);
+      }
+      if (isShadowMode && Object.keys(fileTypeBreakdown).length > 0) {
+        console.log('\n  File types:');
+        for (const [ext, count] of Object.entries(fileTypeBreakdown).sort((a, b) => b[1] - a[1]).slice(0, 10)) {
+          console.log(`    .${ext}: ${count}`);
+        }
       }
     }
   });

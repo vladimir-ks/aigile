@@ -18,6 +18,7 @@ import {
 import { findProjectRoot, loadProjectConfig } from '../utils/config.js';
 import { logCreate, logActivity, logDelete, logTransition, EntityType } from '../services/activity-logger.js';
 import { validateTransition, getValidTransitions, formatTransitionError } from '../services/workflow-engine.js';
+import { validateAndStandardizeDate, isEndDateValid, DATE_FORMAT } from '../utils/date.js';
 
 export const versionCommand = new Command('version')
   .description('Manage project versions/releases');
@@ -27,8 +28,8 @@ versionCommand
   .command('create')
   .argument('<name>', 'Version name (e.g., v1.0.0)')
   .option('-d, --description <description>', 'Version description')
-  .option('--start <date>', 'Start date (YYYY-MM-DD)')
-  .option('--release <date>', 'Release date (YYYY-MM-DD)')
+  .option('--start <date>', `Start date (${DATE_FORMAT})`)
+  .option('--release <date>', `Release date (${DATE_FORMAT})`)
   .description('Create a new version')
   .action((name: string, options) => {
     const opts = getOutputOptions(versionCommand);
@@ -58,12 +59,33 @@ versionCommand
       process.exit(1);
     }
 
+    // Validate and standardize dates if provided
+    let startDate: string | null = null;
+    let releaseDate: string | null = null;
+    try {
+      if (options.start) {
+        startDate = validateAndStandardizeDate(options.start, 'start date');
+      }
+      if (options.release) {
+        releaseDate = validateAndStandardizeDate(options.release, 'release date');
+      }
+    } catch (err) {
+      error(err instanceof Error ? err.message : String(err), opts);
+      process.exit(1);
+    }
+
+    // Validate release date is after start date if both provided
+    if (startDate && releaseDate && !isEndDateValid(startDate, releaseDate)) {
+      error(`Release date (${releaseDate}) must be after start date (${startDate}).`, opts);
+      process.exit(1);
+    }
+
     const versionId = generateId();
 
     run(
       `INSERT INTO versions (id, project_id, name, description, status, start_date, release_date)
        VALUES (?, ?, ?, ?, 'unreleased', ?, ?)`,
-      [versionId, project.id, name, options.description ?? null, options.start ?? null, options.release ?? null]
+      [versionId, project.id, name, options.description ?? null, startDate, releaseDate]
     );
 
     logCreate(project.id, 'version', versionId, { name, description: options.description });
@@ -201,8 +223,8 @@ versionCommand
   .command('update')
   .argument('<name>', 'Version name')
   .option('-d, --description <description>', 'Version description')
-  .option('--start <date>', 'Start date (YYYY-MM-DD)')
-  .option('--release <date>', 'Release date (YYYY-MM-DD)')
+  .option('--start <date>', `Start date (${DATE_FORMAT})`)
+  .option('--release <date>', `Release date (${DATE_FORMAT})`)
   .option('--rename <newName>', 'Rename version')
   .description('Update a version')
   .action((name: string, options) => {
@@ -226,7 +248,10 @@ versionCommand
       process.exit(1);
     }
 
-    const version = queryOne<{ id: string }>('SELECT id FROM versions WHERE project_id = ? AND name = ?', [project.id, name]);
+    const version = queryOne<{ id: string; start_date: string | null; release_date: string | null }>(
+      'SELECT id, start_date, release_date FROM versions WHERE project_id = ? AND name = ?',
+      [project.id, name]
+    );
     if (!version) {
       error(`Version "${name}" not found.`, opts);
       process.exit(1);
@@ -242,16 +267,34 @@ versionCommand
       changes.description = options.description;
     }
 
-    if (options.start !== undefined) {
-      updates.push('start_date = ?');
-      params.push(options.start);
-      changes.start_date = options.start;
+    // Validate and standardize dates if provided
+    let startDate: string | null = null;
+    let releaseDate: string | null = null;
+    try {
+      if (options.start !== undefined) {
+        startDate = validateAndStandardizeDate(options.start, 'start date');
+        updates.push('start_date = ?');
+        params.push(startDate);
+        changes.start_date = startDate;
+      }
+
+      if (options.release !== undefined) {
+        releaseDate = validateAndStandardizeDate(options.release, 'release date');
+        updates.push('release_date = ?');
+        params.push(releaseDate);
+        changes.release_date = releaseDate;
+      }
+    } catch (err) {
+      error(err instanceof Error ? err.message : String(err), opts);
+      process.exit(1);
     }
 
-    if (options.release !== undefined) {
-      updates.push('release_date = ?');
-      params.push(options.release);
-      changes.release_date = options.release;
+    // Validate date order if both are being set or one is being updated
+    const effectiveStart = startDate ?? version.start_date;
+    const effectiveRelease = releaseDate ?? version.release_date;
+    if (effectiveStart && effectiveRelease && !isEndDateValid(effectiveStart, effectiveRelease)) {
+      error(`Release date (${effectiveRelease}) must be after start date (${effectiveStart}).`, opts);
+      process.exit(1);
     }
 
     if (options.rename) {

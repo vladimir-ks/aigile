@@ -4,6 +4,17 @@
 
 AIGILE is a command-line tool that brings agile project management directly to your repository. Designed for AI-assisted development workflows, it tracks epics, stories, tasks, and bugs with a file-first architecture.
 
+## Relationship to CCM
+
+AIGILE is an **optional companion** to [Claude Context Manager](https://github.com/vladimir-ks/claude-context-manager):
+
+| Tool | Purpose |
+|------|---------|
+| **CCM** | Manages Claude Code artifacts (skills, commands, agents) |
+| **AIGILE** | Manages agile work items (epics, stories, tasks, bugs) |
+
+Both tools work independently or together. Use CCM for AI context engineering, use AIGILE for project management.
+
 ## Features
 
 - **File-First Architecture**: Documents with YAML frontmatter are the source of truth

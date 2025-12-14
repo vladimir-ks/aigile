@@ -1,6 +1,6 @@
 {
   "name": "@vladimir-ks/aigile",
-  "version": "0.1.1",
+  "version": "0.2.2",
   "description": "JIRA-compatible Agile project management CLI for AI-assisted development",
   "keywords": [
     "aigile",
@@ -20,14 +20,14 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/vladimir-ks/aigile.git"
+    "url": "https://github.com/vladimir-ks/aigile.git"
   },
   "type": "module",
   "main": "./dist/index.js",
   "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "bin": {
-    "aigile": "dist/bin/aigile.js"
+    "aigile": "./dist/bin/aigile.js"
   },
   "exports": {
     ".": {
@@ -60,6 +60,7 @@
     "chokidar": "^3.6.0",
     "cli-table3": "^0.6.5",
     "commander": "^12.1.0",
+    "picomatch": "^4.0.2",
     "sql.js": "^1.12.0",
     "yaml": "^2.6.1"
   },

@@ -5,6 +5,11 @@
  */
 
 import { defineConfig } from 'tsup';
+import { readFileSync } from 'fs';
+
+// Read version from package.json (single source of truth)
+const pkg = JSON.parse(readFileSync('./package.json', 'utf-8'));
+const version = pkg.version;
 
 export default defineConfig([
   // Library build
@@ -17,7 +22,10 @@ export default defineConfig([
     clean: true,
     minify: false,
     target: 'node18',
-    outDir: 'dist'
+    outDir: 'dist',
+    define: {
+      '__AIGILE_VERSION__': JSON.stringify(version)
+    }
   },
   // CLI build
   {
@@ -32,6 +40,9 @@ export default defineConfig([
     outDir: 'dist/bin',
     banner: {
       js: '#!/usr/bin/env node'
+    },
+    define: {
+      '__AIGILE_VERSION__': JSON.stringify(version)
     }
   }
 ]);

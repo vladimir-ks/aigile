@@ -30,6 +30,7 @@ import { personaCommand } from '../commands/persona.js';
 import { uxJourneyCommand } from '../commands/ux-journey.js';
 import { docCommand } from '../commands/doc.js';
 import { daemonCommand } from '../commands/daemon.js';
+import { fileCommand } from '../commands/file.js';
 
 async function main() {
   const program = new Command();
@@ -47,7 +48,14 @@ async function main() {
   });
 
   // Close database after command completes
+  // Skip for daemon run command since it runs in foreground
   program.hook('postAction', () => {
+    // Check if this is the daemon run command using process.argv
+    // process.argv = ['node', 'aigile.js', 'daemon', 'run', ...]
+    const args = process.argv.slice(2);
+    if (args[0] === 'daemon' && args[1] === 'run') {
+      return; // Keep database open for daemon
+    }
     closeDatabase();
   });
 
@@ -72,6 +80,7 @@ async function main() {
   program.addCommand(uxJourneyCommand);
   program.addCommand(docCommand);
   program.addCommand(daemonCommand);
+  program.addCommand(fileCommand);
 
   // Parse arguments
   await program.parseAsync(process.argv);
