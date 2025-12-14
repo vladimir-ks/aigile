@@ -5,6 +5,30 @@ All notable changes to AIGILE will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.3] - 2025-12-14
+
+### Fixed
+
+- **Profile Validation** (BUG-001)
+  - Invalid profile names now show clear error message instead of crash
+  - `aigile init --profile invalid` shows: "Invalid profile. Valid profiles: full-repo, subrepo, module"
+  - Added default case in profile handling for safety
+
+- **Entity Deletion Protection** (BUG-002)
+  - Epic deletion now checks for child stories before deleting
+  - Story deletion now checks for child tasks before deleting
+  - Clear error message: "Cannot delete: has N child entities"
+  - Added `--force` flag to orphan children (removes parent reference)
+  - Added `--cascade` flag to delete parent with all children recursively
+  - Cascade deletes show count of affected children before deletion
+
+### Changed
+
+- Epic and story delete commands now require `--force` or `--cascade` when children exist
+- Improved data integrity protection for parent-child entity relationships
+
+[0.2.3]: https://github.com/vladimir-ks/aigile/releases/tag/v0.2.3
+
 ## [0.2.2] - 2025-12-14
 
 ### Changed
