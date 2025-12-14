@@ -181,8 +181,11 @@ export class FileWatcher extends EventEmitter {
 
   /**
    * Update category counts from database
+   * This is best-effort - if DB isn't ready, we'll get counts later
    */
   private updateCategoryCounts(): void {
+    // Skip if called before database is ready (can happen during startup)
+    // The counts will be updated on the next file event
     try {
       const counts = queryAll<{ monitoring_category: string; count: number }>(`
         SELECT monitoring_category, COUNT(*) as count
@@ -198,9 +201,9 @@ export class FileWatcher extends EventEmitter {
           this.stats.categoryCounts[cat] = row.count;
         }
       }
-    } catch (err) {
-      // Log but don't fail - category counts may be stale
-      console.warn('[daemon] Could not update category counts:', err);
+    } catch {
+      // Silently ignore - database might not be ready yet
+      // This is expected during daemon startup race conditions
     }
   }
 
@@ -354,8 +357,15 @@ export class FileWatcher extends EventEmitter {
         // Insert new
         this.insertDocument(relativePath, filename, ext, hash, stats.size, hasFrontmatter, frontmatterRaw, metadata, category);
       }
-    } catch {
-      // File might have been deleted before we could process it
+    } catch (err) {
+      // Re-throw database errors - they indicate a real problem
+      // Only silently ignore file system errors (file deleted during processing)
+      const errMsg = err instanceof Error ? err.message : String(err);
+      if (errMsg.includes('Database') || errMsg.includes('database')) {
+        throw err;
+      }
+      // Log unexpected errors for debugging
+      console.error(`[${new Date().toISOString()}] syncFileAdd error for ${relativePath}: ${errMsg}`);
     }
   }
 

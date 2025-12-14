@@ -17,6 +17,7 @@ import {
 } from '../services/output-formatter.js';
 import { findProjectRoot, loadProjectConfig } from '../utils/config.js';
 import { validateTransition, getValidTransitions, formatTransitionError } from '../services/workflow-engine.js';
+import { validateAndStandardizeDate, isEndDateValid, DATE_FORMAT } from '../utils/date.js';
 
 export const initiativeCommand = new Command('initiative')
   .description('Manage initiatives (portfolio-level objectives)');
@@ -28,8 +29,8 @@ initiativeCommand
   .option('-d, --description <description>', 'Initiative description')
   .option('-p, --priority <priority>', 'Priority (Highest/High/Medium/Low/Lowest)', 'Medium')
   .option('--owner <owner>', 'Owner')
-  .option('--start <date>', 'Start date (YYYY-MM-DD)')
-  .option('--target <date>', 'Target date (YYYY-MM-DD)')
+  .option('--start <date>', `Start date (${DATE_FORMAT})`)
+  .option('--target <date>', `Target date (${DATE_FORMAT})`)
   .description('Create a new initiative')
   .action((summary: string, options) => {
     const opts = getOutputOptions(initiativeCommand);
@@ -52,6 +53,27 @@ initiativeCommand
       process.exit(1);
     }
 
+    // Validate and standardize dates if provided
+    let startDate: string | null = null;
+    let targetDate: string | null = null;
+    try {
+      if (options.start) {
+        startDate = validateAndStandardizeDate(options.start, 'start date');
+      }
+      if (options.target) {
+        targetDate = validateAndStandardizeDate(options.target, 'target date');
+      }
+    } catch (err) {
+      error(err instanceof Error ? err.message : String(err), opts);
+      process.exit(1);
+    }
+
+    // Validate target date is after start date if both provided
+    if (startDate && targetDate && !isEndDateValid(startDate, targetDate)) {
+      error(`Target date (${targetDate}) must be after start date (${startDate}).`, opts);
+      process.exit(1);
+    }
+
     const initiativeId = generateId();
     const initiativeKey = getNextKey(config.project.key);
 
@@ -66,8 +88,8 @@ initiativeCommand
         options.description ?? null,
         options.priority,
         options.owner ?? null,
-        options.start ?? null,
-        options.target ?? null
+        startDate,
+        targetDate
       ]
     );
 
@@ -182,13 +204,16 @@ initiativeCommand
   .option('-d, --description <description>', 'New description')
   .option('-p, --priority <priority>', 'New priority')
   .option('--owner <owner>', 'New owner')
-  .option('--start <date>', 'New start date')
-  .option('--target <date>', 'New target date')
+  .option('--start <date>', `New start date (${DATE_FORMAT})`)
+  .option('--target <date>', `New target date (${DATE_FORMAT})`)
   .description('Update initiative')
   .action((key: string, options) => {
     const opts = getOutputOptions(initiativeCommand);
 
-    const initiative = queryOne('SELECT id FROM initiatives WHERE key = ?', [key]);
+    const initiative = queryOne<{ id: string; start_date: string | null; target_date: string | null }>(
+      'SELECT id, start_date, target_date FROM initiatives WHERE key = ?',
+      [key]
+    );
     if (!initiative) {
       error(`Initiative "${key}" not found.`, opts);
       process.exit(1);
@@ -213,13 +238,32 @@ initiativeCommand
       updates.push('owner = ?');
       params.push(options.owner);
     }
-    if (options.start) {
-      updates.push('start_date = ?');
-      params.push(options.start);
+
+    // Validate and standardize dates if provided
+    let startDate: string | null = null;
+    let targetDate: string | null = null;
+    try {
+      if (options.start) {
+        startDate = validateAndStandardizeDate(options.start, 'start date');
+        updates.push('start_date = ?');
+        params.push(startDate);
+      }
+      if (options.target) {
+        targetDate = validateAndStandardizeDate(options.target, 'target date');
+        updates.push('target_date = ?');
+        params.push(targetDate);
+      }
+    } catch (err) {
+      error(err instanceof Error ? err.message : String(err), opts);
+      process.exit(1);
     }
-    if (options.target) {
-      updates.push('target_date = ?');
-      params.push(options.target);
+
+    // Validate date order if both are being set or one is being updated
+    const effectiveStart = startDate ?? initiative.start_date;
+    const effectiveTarget = targetDate ?? initiative.target_date;
+    if (effectiveStart && effectiveTarget && !isEndDateValid(effectiveStart, effectiveTarget)) {
+      error(`Target date (${effectiveTarget}) must be after start date (${effectiveStart}).`, opts);
+      process.exit(1);
     }
 
     if (updates.length === 0) {

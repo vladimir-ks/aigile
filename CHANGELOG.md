@@ -5,6 +5,31 @@ All notable changes to AIGILE will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.1] - 2025-12-14
+
+### Fixed
+
+- **Daemon File Detection**
+  - Fixed database connection being closed for daemon async events
+  - New files are now correctly detected and persisted to database
+  - File changes properly trigger database updates
+  - Added proper error propagation for database write failures
+
+- **Date Validation**
+  - Added standardized date validation for all date fields
+  - Dates are now standardized to ISO 8601 format (YYYY-MM-DD)
+  - Multiple input formats supported (MM/DD/YYYY, DD.MM.YYYY, YYYY/MM/DD)
+  - Validates date ranges (end date must be after start date)
+  - Clear error messages for invalid dates
+
+### Changed
+
+- Sprint, initiative, and version commands now validate date inputs
+- Improved error handling in file watcher with detailed logging
+- Test suite now at 110 passing tests
+
+[0.2.1]: https://github.com/vladimir-ks/aigile/releases/tag/v0.2.1
+
 ## [0.2.0] - 2025-12-14
 
 ### Added

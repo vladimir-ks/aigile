@@ -17,6 +17,11 @@ import {
   getOutputOptions
 } from '../services/output-formatter.js';
 import { findProjectRoot, loadProjectConfig } from '../utils/config.js';
+import {
+  validateAndStandardizeDate,
+  isEndDateValid,
+  DATE_FORMAT,
+} from '../utils/date.js';
 
 export const sprintCommand = new Command('sprint')
   .description('Manage sprints');
@@ -25,8 +30,8 @@ export const sprintCommand = new Command('sprint')
 sprintCommand
   .command('create')
   .argument('<name>', 'Sprint name')
-  .requiredOption('--start <date>', 'Start date (YYYY-MM-DD)')
-  .requiredOption('--end <date>', 'End date (YYYY-MM-DD)')
+  .requiredOption('--start <date>', `Start date (${DATE_FORMAT})`)
+  .requiredOption('--end <date>', `End date (${DATE_FORMAT})`)
   .option('-g, --goal <goal>', 'Sprint goal')
   .description('Create a new sprint')
   .action((name: string, options) => {
@@ -50,18 +55,35 @@ sprintCommand
       process.exit(1);
     }
 
+    // Validate and standardize dates
+    let startDate: string;
+    let endDate: string;
+    try {
+      startDate = validateAndStandardizeDate(options.start, 'start date');
+      endDate = validateAndStandardizeDate(options.end, 'end date');
+    } catch (err) {
+      error(err instanceof Error ? err.message : String(err), opts);
+      process.exit(1);
+    }
+
+    // Validate end date is after start date
+    if (!isEndDateValid(startDate, endDate)) {
+      error(`End date (${endDate}) must be after start date (${startDate}).`, opts);
+      process.exit(1);
+    }
+
     const sprintId = generateId();
 
     run(
       `INSERT INTO sprints (id, project_id, name, goal, start_date, end_date, status)
        VALUES (?, ?, ?, ?, ?, ?, 'future')`,
-      [sprintId, project.id, name, options.goal ?? null, options.start, options.end]
+      [sprintId, project.id, name, options.goal ?? null, startDate, endDate]
     );
 
     if (opts.json) {
-      console.log(JSON.stringify({ success: true, data: { name, start: options.start, end: options.end } }));
+      console.log(JSON.stringify({ success: true, data: { name, start: startDate, end: endDate } }));
     } else {
-      success(`Created sprint "${name}" (${options.start} - ${options.end})`, opts);
+      success(`Created sprint "${name}" (${startDate} - ${endDate})`, opts);
     }
   });
 

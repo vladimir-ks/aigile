@@ -48,7 +48,14 @@ async function main() {
   });
 
   // Close database after command completes
+  // Skip for daemon run command since it runs in foreground
   program.hook('postAction', () => {
+    // Check if this is the daemon run command using process.argv
+    // process.argv = ['node', 'aigile.js', 'daemon', 'run', ...]
+    const args = process.argv.slice(2);
+    if (args[0] === 'daemon' && args[1] === 'run') {
+      return; // Keep database open for daemon
+    }
     closeDatabase();
   });
 

@@ -340,6 +340,7 @@ export function getSyncStatus(projectId: string): {
   modified: number;
   deleted: number;
   lastScan: string | null;
+  byCategory: { allow: number; deny: number; unknown: number };
 } {
   const stats = queryOne<{
     total: number;
@@ -356,6 +357,19 @@ export function getSyncStatus(projectId: string): {
     WHERE project_id = ?
   `, [projectId]);
 
+  const categoryStats = queryOne<{
+    allow: number;
+    deny: number;
+    unknown: number;
+  }>(`
+    SELECT
+      SUM(CASE WHEN monitoring_category = 'allow' THEN 1 ELSE 0 END) as allow,
+      SUM(CASE WHEN monitoring_category = 'deny' THEN 1 ELSE 0 END) as deny,
+      SUM(CASE WHEN monitoring_category = 'unknown' OR monitoring_category IS NULL THEN 1 ELSE 0 END) as unknown
+    FROM documents
+    WHERE project_id = ?
+  `, [projectId]);
+
   const lastScan = queryOne<{ last_scanned_at: string }>(
     'SELECT MAX(last_scanned_at) as last_scanned_at FROM documents WHERE project_id = ?',
     [projectId]
@@ -366,7 +380,12 @@ export function getSyncStatus(projectId: string): {
     tracked: stats?.tracked ?? 0,
     modified: stats?.modified ?? 0,
     deleted: stats?.deleted ?? 0,
-    lastScan: lastScan?.last_scanned_at ?? null
+    lastScan: lastScan?.last_scanned_at ?? null,
+    byCategory: {
+      allow: categoryStats?.allow ?? 0,
+      deny: categoryStats?.deny ?? 0,
+      unknown: categoryStats?.unknown ?? 0
+    }
   };
 }
 
