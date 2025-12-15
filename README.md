@@ -1,8 +1,34 @@
 # AIGILE
 
-> JIRA-compatible Agile project management CLI for AI-assisted development
+> AI-first agile system for autonomous product development and project management
 
-AIGILE is a command-line tool that brings agile project management directly to your repository. Designed for AI-assisted development workflows, it tracks epics, stories, tasks, and bugs with a file-first architecture.
+AIGILE provides structured context management for AI agents, enabling them to execute any project task correctly. Whether you're building software, running a business, conducting research, or managing personal projects—AIGILE gives AI agents the full understanding they need through agile artifacts (initiatives, epics, stories, tasks).
+
+## Why AIGILE?
+
+**The problem**: AI agents struggle without structured context. They need to understand *what* needs to be done, *why*, *how*, and the *priorities*.
+
+**The solution**: Agile artifacts aren't just for tracking work—they provide optimal structured context for AI agents to understand projects completely. One human plus AI agents equals a full team.
+
+## Use Cases
+
+| Domain | Examples |
+|--------|----------|
+| **Software Development** | Build apps, APIs, libraries with AI agents writing code |
+| **Product Management** | Define roadmaps, track features, manage releases |
+| **Content & Marketing** | Plan campaigns, track content creation, manage launches |
+| **Research Projects** | Structure investigations, track findings, manage deliverables |
+| **Personal Projects** | Organize goals, track progress, manage any endeavor |
+| **Business Operations** | SOPs, process documentation, operational tracking |
+
+## Features
+
+- **AI-First Design**: Built for AI agents, not human typing convenience
+- **Session Tracking**: Verified work sessions with file coverage tracking
+- **File-First Architecture**: Documents with YAML frontmatter are the source of truth
+- **Automatic Sync**: File watcher daemon keeps database in sync with your files
+- **Agile Entities**: Initiatives, Epics, Stories, Tasks, Bugs, Sprints
+- **Three Init Profiles**: `full-repo`, `subrepo`, `module` for different project structures
 
 ## Relationship to CCM
 
@@ -11,18 +37,9 @@ AIGILE is an **optional companion** to [Claude Context Manager](https://github.c
 | Tool | Purpose |
 |------|---------|
 | **CCM** | Manages Claude Code artifacts (skills, commands, agents) |
-| **AIGILE** | Manages agile work items (epics, stories, tasks, bugs) |
+| **AIGILE** | Manages agile work items and project context |
 
-Both tools work independently or together. Use CCM for AI context engineering, use AIGILE for project management.
-
-## Features
-
-- **File-First Architecture**: Documents with YAML frontmatter are the source of truth
-- **Automatic Sync**: File watcher daemon keeps database in sync with your files
-- **JIRA-Compatible**: Familiar concepts (Epics, Stories, Tasks, Bugs, Sprints)
-- **AI-Optimized**: Designed for Claude Code and other AI assistants
-- **Three Init Profiles**: `full-repo`, `subrepo`, `module` for different project structures
-- **Frontmatter Metadata**: Status, version, modules, dependencies tracking
+Both tools work independently or together.
 
 ## Installation
 
