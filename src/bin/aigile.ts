@@ -31,6 +31,7 @@ import { uxJourneyCommand } from '../commands/ux-journey.js';
 import { docCommand } from '../commands/doc.js';
 import { daemonCommand } from '../commands/daemon.js';
 import { fileCommand } from '../commands/file.js';
+import { chunkCommand } from '../commands/chunk.js';
 
 async function main() {
   const program = new Command();
@@ -81,6 +82,7 @@ async function main() {
   program.addCommand(docCommand);
   program.addCommand(daemonCommand);
   program.addCommand(fileCommand);
+  program.addCommand(chunkCommand);
 
   // Parse arguments
   await program.parseAsync(process.argv);
