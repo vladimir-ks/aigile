@@ -22,7 +22,10 @@ import {
   endSession,
   getActiveSession,
   listSessions,
-  getSession
+  getSession,
+  getSessionByName,
+  resumeSession,
+  getSessionResumeInfo
 } from '../services/session-service.js';
 import {
   getActivityLog,
@@ -35,8 +38,9 @@ export const sessionCommand = new Command('session')
 // Start a new session
 sessionCommand
   .command('start')
+  .argument('[name]', 'Optional session name (e.g., init-241215-1030)')
   .description('Start a new AI work session')
-  .action(() => {
+  .action((name?: string) => {
     const opts = getOutputOptions(sessionCommand);
 
     const projectRoot = findProjectRoot();
@@ -57,18 +61,22 @@ sessionCommand
       process.exit(1);
     }
 
-    const session = startSession(project.id);
+    const session = startSession(project.id, name);
 
     if (opts.json) {
       console.log(JSON.stringify({
         success: true,
         data: {
           sessionId: session.id,
+          name: session.name,
           startedAt: session.startedAt
         }
       }));
     } else {
       success(`Session started: ${session.id.slice(0, 8)}...`, opts);
+      if (session.name) {
+        info(`Name: ${session.name}`, opts);
+      }
       info(`Started at: ${session.startedAt}`, opts);
     }
   });
@@ -408,6 +416,137 @@ sessionCommand
       ],
       opts
     );
+  });
+
+// Find session by name
+sessionCommand
+  .command('find')
+  .argument('<name>', 'Session name to search for')
+  .description('Find a session by name')
+  .action((name: string) => {
+    const opts = getOutputOptions(sessionCommand);
+
+    const projectRoot = findProjectRoot();
+    if (!projectRoot) {
+      error('Not in an AIGILE project. Run "aigile init" first.', opts);
+      process.exit(1);
+    }
+
+    const config = loadProjectConfig(projectRoot);
+    if (!config) {
+      error('Could not load project config.', opts);
+      process.exit(1);
+    }
+
+    const project = queryOne<{ id: string }>('SELECT id FROM projects WHERE key = ?', [config.project.key]);
+    if (!project) {
+      error(`Project "${config.project.key}" not found in database.`, opts);
+      process.exit(1);
+    }
+
+    const session = getSessionByName(project.id, name);
+    if (!session) {
+      error(`Session "${name}" not found.`, opts);
+      process.exit(1);
+    }
+
+    if (opts.json) {
+      console.log(JSON.stringify({
+        success: true,
+        data: {
+          id: session.id,
+          name: session.name,
+          status: session.status,
+          startedAt: session.startedAt,
+          endedAt: session.endedAt
+        }
+      }));
+    } else {
+      success(`Found session: ${session.id.slice(0, 8)}...`, opts);
+      console.log(`  Name: ${session.name}`);
+      console.log(`  Status: ${session.status}`);
+      console.log(`  Started: ${session.startedAt}`);
+      if (session.endedAt) {
+        console.log(`  Ended: ${session.endedAt}`);
+      }
+    }
+  });
+
+// Resume an existing session
+sessionCommand
+  .command('resume')
+  .argument('<name-or-id>', 'Session name or ID to resume')
+  .description('Resume an incomplete session')
+  .action((nameOrId: string) => {
+    const opts = getOutputOptions(sessionCommand);
+
+    const projectRoot = findProjectRoot();
+    if (!projectRoot) {
+      error('Not in an AIGILE project. Run "aigile init" first.', opts);
+      process.exit(1);
+    }
+
+    const config = loadProjectConfig(projectRoot);
+    if (!config) {
+      error('Could not load project config.', opts);
+      process.exit(1);
+    }
+
+    const project = queryOne<{ id: string }>('SELECT id FROM projects WHERE key = ?', [config.project.key]);
+    if (!project) {
+      error(`Project "${config.project.key}" not found in database.`, opts);
+      process.exit(1);
+    }
+
+    // Try to find by name first, then by ID
+    let session = getSessionByName(project.id, nameOrId);
+    if (!session) {
+      session = getSession(nameOrId);
+    }
+
+    if (!session) {
+      error(`Session "${nameOrId}" not found.`, opts);
+      process.exit(1);
+    }
+
+    if (session.status === 'completed') {
+      error(`Session "${nameOrId}" is already completed. Cannot resume.`, opts);
+      process.exit(1);
+    }
+
+    const resumed = resumeSession(project.id, session.id);
+    if (!resumed) {
+      error(`Failed to resume session "${nameOrId}".`, opts);
+      process.exit(1);
+    }
+
+    // Get resume info
+    const resumeInfo = getSessionResumeInfo(session.id);
+
+    if (opts.json) {
+      console.log(JSON.stringify({
+        success: true,
+        data: {
+          id: resumed.id,
+          name: resumed.name,
+          status: resumed.status,
+          chunks: resumeInfo.chunks.length,
+          coverage: resumeInfo.coverage
+        }
+      }));
+    } else {
+      success(`Session resumed: ${resumed.id.slice(0, 8)}...`, opts);
+      if (resumed.name) {
+        console.log(`  Name: ${resumed.name}`);
+      }
+      console.log(`  Status: ${resumed.status}`);
+      console.log(`  Chunks: ${resumeInfo.chunks.length}`);
+      console.log(`  Coverage: ${resumeInfo.coverage.reviewed}/${resumeInfo.coverage.total} assigned files reviewed`);
+      if (resumeInfo.coverage.total > 0) {
+        const pct = Math.round((resumeInfo.coverage.reviewed / resumeInfo.coverage.total) * 100);
+        console.log(`  Progress: ${pct}%`);
+      }
+    }
   });
 
 /**

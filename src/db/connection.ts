@@ -412,6 +412,7 @@ function initializeSchema(database: SqlJsDatabase): void {
     CREATE TABLE IF NOT EXISTS sessions (
       id TEXT PRIMARY KEY,
       project_id TEXT REFERENCES projects(id),
+      name TEXT,
       started_at TEXT DEFAULT (datetime('now')),
       ended_at TEXT,
       summary TEXT,
@@ -457,6 +458,47 @@ function initializeSchema(database: SqlJsDatabase): void {
       updated_at TEXT DEFAULT (datetime('now'))
     )
   `);
+
+  // Chunks table (file review chunk definitions)
+  database.run(`
+    CREATE TABLE IF NOT EXISTS chunks (
+      id TEXT PRIMARY KEY,
+      session_id TEXT REFERENCES sessions(id),
+      name TEXT NOT NULL,
+      patterns TEXT,
+      assigned_files TEXT,
+      review_mode TEXT DEFAULT 'standard',
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now'))
+    )
+  `);
+
+  // Session files table (links files to review sessions)
+  database.run(`
+    CREATE TABLE IF NOT EXISTS session_files (
+      id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL REFERENCES sessions(id),
+      document_id TEXT NOT NULL REFERENCES documents(id),
+      chunk_id TEXT REFERENCES chunks(id),
+      agent_id TEXT,
+      report_path TEXT,
+      reviewed_at TEXT NOT NULL DEFAULT (datetime('now')),
+      review_type TEXT DEFAULT 'assigned',
+      is_foundational INTEGER DEFAULT 0,
+      quality_issues TEXT,
+      created_at TEXT DEFAULT (datetime('now')),
+      UNIQUE(session_id, document_id)
+    )
+  `);
+
+  // Indexes for session_files
+  database.run(`CREATE INDEX IF NOT EXISTS idx_session_files_session ON session_files(session_id)`);
+  database.run(`CREATE INDEX IF NOT EXISTS idx_session_files_document ON session_files(document_id)`);
+  database.run(`CREATE INDEX IF NOT EXISTS idx_session_files_chunk ON session_files(chunk_id)`);
+  database.run(`CREATE INDEX IF NOT EXISTS idx_session_files_report ON session_files(report_path)`);
+
+  // Indexes for chunks
+  database.run(`CREATE INDEX IF NOT EXISTS idx_chunks_session ON chunks(session_id)`);
 }
 
 /**
@@ -490,6 +532,333 @@ export function getNextKey(projectKey: string): string {
   }
 
   return `${projectKey}-${nextValue}`;
+}
+
+// ============================================================================
+// Chunk Management Helpers
+// ============================================================================
+
+export interface Chunk {
+  id: string;
+  session_id: string;
+  name: string;
+  patterns: string | null;
+  assigned_files: string | null;
+  review_mode: string;
+  created_at: string;
+  updated_at: string;
+}
+
+/**
+ * Create a new chunk
+ */
+export function createChunk(
+  sessionId: string,
+  chunkId: string,
+  name: string,
+  patterns: string[] | null,
+  assignedFiles: string[] | null,
+  reviewMode: string = 'standard'
+): void {
+  run(
+    `INSERT INTO chunks (id, session_id, name, patterns, assigned_files, review_mode)
+     VALUES (?, ?, ?, ?, ?, ?)`,
+    [
+      chunkId,
+      sessionId,
+      name,
+      patterns ? JSON.stringify(patterns) : null,
+      assignedFiles ? JSON.stringify(assignedFiles) : null,
+      reviewMode
+    ]
+  );
+}
+
+/**
+ * Get chunk by ID
+ */
+export function getChunk(chunkId: string): Chunk | undefined {
+  return queryOne<Chunk>('SELECT * FROM chunks WHERE id = ?', [chunkId]);
+}
+
+/**
+ * Get all chunks for a session
+ */
+export function getSessionChunks(sessionId: string): Chunk[] {
+  return queryAll<Chunk>(
+    'SELECT * FROM chunks WHERE session_id = ? ORDER BY created_at',
+    [sessionId]
+  );
+}
+
+/**
+ * Assign files to a chunk
+ */
+export function assignFilesToChunk(chunkId: string, files: string[]): void {
+  const chunk = getChunk(chunkId);
+  if (!chunk) {
+    throw new Error(`Chunk "${chunkId}" not found`);
+  }
+
+  const existing = chunk.assigned_files ? JSON.parse(chunk.assigned_files) : [];
+  const merged = [...new Set([...existing, ...files])];
+
+  run(
+    `UPDATE chunks SET assigned_files = ?, updated_at = datetime('now') WHERE id = ?`,
+    [JSON.stringify(merged), chunkId]
+  );
+}
+
+// ============================================================================
+// Session File Tracking Helpers
+// ============================================================================
+
+export interface SessionFile {
+  id: string;
+  session_id: string;
+  document_id: string;
+  chunk_id: string | null;
+  agent_id: string | null;
+  report_path: string | null;
+  reviewed_at: string;
+  review_type: string;
+  is_foundational: number;
+  quality_issues: string | null;
+  created_at: string;
+}
+
+/**
+ * Tag a file as reviewed
+ */
+export function tagFileReviewed(
+  sessionId: string,
+  documentId: string,
+  options: {
+    chunkId?: string;
+    agentId?: string;
+    reportPath?: string;
+    reviewType?: 'assigned' | 'explored' | 'skipped';
+    isFoundational?: boolean;
+  } = {}
+): string {
+  // Check if already tagged in this session
+  const existing = queryOne<{ id: string }>(
+    'SELECT id FROM session_files WHERE session_id = ? AND document_id = ?',
+    [sessionId, documentId]
+  );
+
+  if (existing) {
+    // Update existing tag with new info (allows adding chunk_id, changing type, etc.)
+    run(
+      `UPDATE session_files SET
+        chunk_id = COALESCE(?, chunk_id),
+        agent_id = COALESCE(?, agent_id),
+        report_path = COALESCE(?, report_path),
+        review_type = ?,
+        is_foundational = CASE WHEN ? = 1 THEN 1 ELSE is_foundational END,
+        reviewed_at = datetime('now')
+       WHERE id = ?`,
+      [
+        options.chunkId ?? null,
+        options.agentId ?? null,
+        options.reportPath ?? null,
+        options.reviewType ?? 'assigned',
+        options.isFoundational ? 1 : 0,
+        existing.id
+      ]
+    );
+    return existing.id;
+  }
+
+  const id = generateId();
+  run(
+    `INSERT INTO session_files (id, session_id, document_id, chunk_id, agent_id, report_path, review_type, is_foundational)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      id,
+      sessionId,
+      documentId,
+      options.chunkId ?? null,
+      options.agentId ?? null,
+      options.reportPath ?? null,
+      options.reviewType ?? 'assigned',
+      options.isFoundational ? 1 : 0
+    ]
+  );
+  return id;
+}
+
+/**
+ * Flag a file with quality issues
+ */
+export function flagFileQualityIssue(
+  sessionFileId: string,
+  issues: string[]
+): void {
+  const existing = queryOne<{ quality_issues: string | null }>(
+    'SELECT quality_issues FROM session_files WHERE id = ?',
+    [sessionFileId]
+  );
+
+  const current = existing?.quality_issues ? JSON.parse(existing.quality_issues) : [];
+  const merged = [...new Set([...current, ...issues])];
+
+  run(
+    `UPDATE session_files SET quality_issues = ? WHERE id = ?`,
+    [JSON.stringify(merged), sessionFileId]
+  );
+}
+
+/**
+ * Get all session files for a session
+ */
+export function getSessionFiles(
+  sessionId: string,
+  options: {
+    chunkId?: string;
+    reviewType?: string;
+    foundationalOnly?: boolean;
+  } = {}
+): SessionFile[] {
+  let sql = 'SELECT * FROM session_files WHERE session_id = ?';
+  const params: unknown[] = [sessionId];
+
+  if (options.chunkId) {
+    sql += ' AND chunk_id = ?';
+    params.push(options.chunkId);
+  }
+  if (options.reviewType) {
+    sql += ' AND review_type = ?';
+    params.push(options.reviewType);
+  }
+  if (options.foundationalOnly) {
+    sql += ' AND is_foundational = 1';
+  }
+
+  return queryAll<SessionFile>(sql, params);
+}
+
+/**
+ * Get files with quality issues
+ */
+export function getFilesWithQualityIssues(sessionId: string): SessionFile[] {
+  return queryAll<SessionFile>(
+    `SELECT * FROM session_files
+     WHERE session_id = ? AND quality_issues IS NOT NULL AND quality_issues != '[]'`,
+    [sessionId]
+  );
+}
+
+/**
+ * Get untagged files for a session (files in documents not in session_files)
+ */
+export function getUntaggedFiles(
+  projectId: string,
+  sessionId: string,
+  options: {
+    chunkId?: string;
+    assignedOnly?: boolean;
+  } = {}
+): { path: string; document_id: string }[] {
+  // If assignedOnly and chunkId provided, only return untagged files that were assigned to that chunk
+  if (options.assignedOnly && options.chunkId) {
+    const chunk = getChunk(options.chunkId);
+    if (!chunk || !chunk.assigned_files) {
+      return [];
+    }
+
+    const assignedFiles: string[] = JSON.parse(chunk.assigned_files);
+
+    // Get documents for assigned files that haven't been tagged
+    return queryAll<{ path: string; document_id: string }>(
+      `SELECT d.path, d.id as document_id
+       FROM documents d
+       WHERE d.project_id = ?
+       AND d.path IN (${assignedFiles.map(() => '?').join(',')})
+       AND d.id NOT IN (
+         SELECT sf.document_id FROM session_files sf WHERE sf.session_id = ?
+       )`,
+      [projectId, ...assignedFiles, sessionId]
+    );
+  }
+
+  // Otherwise return all untagged files
+  return queryAll<{ path: string; document_id: string }>(
+    `SELECT d.path, d.id as document_id
+     FROM documents d
+     WHERE d.project_id = ?
+     AND d.id NOT IN (
+       SELECT sf.document_id FROM session_files sf WHERE sf.session_id = ?
+     )`,
+    [projectId, sessionId]
+  );
+}
+
+/**
+ * Get coverage statistics for a session
+ */
+export function getCoverageStats(
+  sessionId: string,
+  chunkId?: string
+): {
+  assigned: { total: number; reviewed: number };
+  explored: number;
+  foundational: number;
+  skipped: number;
+} {
+  const baseWhere = chunkId
+    ? 'WHERE session_id = ? AND chunk_id = ?'
+    : 'WHERE session_id = ?';
+  const params = chunkId ? [sessionId, chunkId] : [sessionId];
+
+  const assigned = queryOne<{ count: number }>(
+    `SELECT COUNT(*) as count FROM session_files ${baseWhere} AND review_type = 'assigned'`,
+    params
+  );
+  const explored = queryOne<{ count: number }>(
+    `SELECT COUNT(*) as count FROM session_files ${baseWhere} AND review_type = 'explored'`,
+    params
+  );
+  const foundational = queryOne<{ count: number }>(
+    `SELECT COUNT(*) as count FROM session_files ${baseWhere} AND is_foundational = 1`,
+    params
+  );
+  const skipped = queryOne<{ count: number }>(
+    `SELECT COUNT(*) as count FROM session_files ${baseWhere} AND review_type = 'skipped'`,
+    params
+  );
+
+  // For assigned total, get from chunk definition(s)
+  let assignedTotal = 0;
+  if (chunkId) {
+    const chunk = getChunk(chunkId);
+    if (chunk?.assigned_files) {
+      try {
+        assignedTotal = JSON.parse(chunk.assigned_files).length;
+      } catch {
+        assignedTotal = 0;
+      }
+    }
+  } else {
+    // Aggregate across all chunks in the session
+    const chunks = getSessionChunks(sessionId);
+    for (const chunk of chunks) {
+      if (chunk.assigned_files) {
+        try {
+          assignedTotal += JSON.parse(chunk.assigned_files).length;
+        } catch {
+          // Skip invalid JSON
+        }
+      }
+    }
+  }
+
+  return {
+    assigned: { total: assignedTotal, reviewed: assigned?.count ?? 0 },
+    explored: explored?.count ?? 0,
+    foundational: foundational?.count ?? 0,
+    skipped: skipped?.count ?? 0
+  };
 }
 
 /**
@@ -548,6 +917,7 @@ export function runMigrations(): void {
     CREATE TABLE IF NOT EXISTS sessions (
       id TEXT PRIMARY KEY,
       project_id TEXT REFERENCES projects(id),
+      name TEXT,
       started_at TEXT DEFAULT (datetime('now')),
       ended_at TEXT,
       summary TEXT,
@@ -556,6 +926,13 @@ export function runMigrations(): void {
       status TEXT DEFAULT 'active'
     )
   `);
+
+  // Add name column to sessions if missing (migration for 0.2.4)
+  try {
+    database.run(`ALTER TABLE sessions ADD COLUMN name TEXT`);
+  } catch {
+    // Column already exists, ignore
+  }
 
   // Create activity_log table if missing (added after initial release)
   database.run(`
@@ -571,6 +948,49 @@ export function runMigrations(): void {
       timestamp TEXT DEFAULT (datetime('now'))
     )
   `);
+
+  // Create chunks table if missing (v0.2.4+)
+  database.run(`
+    CREATE TABLE IF NOT EXISTS chunks (
+      id TEXT PRIMARY KEY,
+      session_id TEXT REFERENCES sessions(id),
+      name TEXT NOT NULL,
+      patterns TEXT,
+      assigned_files TEXT,
+      review_mode TEXT DEFAULT 'standard',
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now'))
+    )
+  `);
+
+  // Create session_files table if missing (v0.2.4+)
+  database.run(`
+    CREATE TABLE IF NOT EXISTS session_files (
+      id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL REFERENCES sessions(id),
+      document_id TEXT NOT NULL REFERENCES documents(id),
+      chunk_id TEXT REFERENCES chunks(id),
+      agent_id TEXT,
+      report_path TEXT,
+      reviewed_at TEXT NOT NULL DEFAULT (datetime('now')),
+      review_type TEXT DEFAULT 'assigned',
+      is_foundational INTEGER DEFAULT 0,
+      quality_issues TEXT,
+      created_at TEXT DEFAULT (datetime('now')),
+      UNIQUE(session_id, document_id)
+    )
+  `);
+
+  // Create indexes for new tables (IF NOT EXISTS handles idempotency)
+  try {
+    database.run(`CREATE INDEX IF NOT EXISTS idx_session_files_session ON session_files(session_id)`);
+    database.run(`CREATE INDEX IF NOT EXISTS idx_session_files_document ON session_files(document_id)`);
+    database.run(`CREATE INDEX IF NOT EXISTS idx_session_files_chunk ON session_files(chunk_id)`);
+    database.run(`CREATE INDEX IF NOT EXISTS idx_session_files_report ON session_files(report_path)`);
+    database.run(`CREATE INDEX IF NOT EXISTS idx_chunks_session ON chunks(session_id)`);
+  } catch {
+    // Indexes might already exist, ignore error
+  }
 
   saveDatabase();
 }

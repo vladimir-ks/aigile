@@ -385,4 +385,116 @@ function initializeSchema(database: SqlJsDatabase): void {
       created_at TEXT DEFAULT (datetime('now'))
     )
   `);
+
+  // Sessions table
+  database.run(`
+    CREATE TABLE IF NOT EXISTS sessions (
+      id TEXT PRIMARY KEY,
+      project_id TEXT REFERENCES projects(id),
+      name TEXT,
+      started_at TEXT DEFAULT (datetime('now')),
+      ended_at TEXT,
+      summary TEXT,
+      entities_modified INTEGER DEFAULT 0,
+      files_modified INTEGER DEFAULT 0,
+      status TEXT DEFAULT 'active'
+    )
+  `);
+
+  // Documents table (file tracking)
+  database.run(`
+    CREATE TABLE IF NOT EXISTS documents (
+      id TEXT PRIMARY KEY,
+      project_id TEXT REFERENCES projects(id),
+      path TEXT NOT NULL,
+      filename TEXT NOT NULL,
+      file_type TEXT,
+      status TEXT DEFAULT 'tracked',
+      file_hash TEXT,
+      size_bytes INTEGER,
+      last_modified TEXT,
+      metadata TEXT,
+      tldr TEXT,
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now'))
+    )
+  `);
+  database.run(`CREATE UNIQUE INDEX IF NOT EXISTS idx_documents_path ON documents(project_id, path)`);
+
+  // Chunks table
+  database.run(`
+    CREATE TABLE IF NOT EXISTS chunks (
+      id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL REFERENCES sessions(id),
+      name TEXT NOT NULL,
+      patterns TEXT,
+      assigned_files TEXT,
+      review_mode TEXT DEFAULT 'standard',
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now'))
+    )
+  `);
+  database.run(`CREATE INDEX IF NOT EXISTS idx_chunks_session ON chunks(session_id)`);
+
+  // Session files table
+  database.run(`
+    CREATE TABLE IF NOT EXISTS session_files (
+      id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL REFERENCES sessions(id),
+      document_id TEXT NOT NULL REFERENCES documents(id),
+      chunk_id TEXT REFERENCES chunks(id),
+      agent_id TEXT,
+      report_path TEXT,
+      reviewed_at TEXT NOT NULL DEFAULT (datetime('now')),
+      review_type TEXT DEFAULT 'assigned',
+      is_foundational INTEGER DEFAULT 0,
+      quality_issues TEXT,
+      created_at TEXT DEFAULT (datetime('now')),
+      UNIQUE(session_id, document_id)
+    )
+  `);
+  database.run(`CREATE INDEX IF NOT EXISTS idx_session_files_session ON session_files(session_id)`);
+  database.run(`CREATE INDEX IF NOT EXISTS idx_session_files_document ON session_files(document_id)`);
+  database.run(`CREATE INDEX IF NOT EXISTS idx_session_files_chunk ON session_files(chunk_id)`);
+}
+
+/**
+ * Create a test session
+ */
+export function createTestSession(projectId: string, name?: string): string {
+  const sessionId = generateTestId();
+  testRun(
+    `INSERT INTO sessions (id, project_id, name, status) VALUES (?, ?, ?, 'active')`,
+    [sessionId, projectId, name ?? null]
+  );
+  return sessionId;
+}
+
+/**
+ * Create a test document
+ */
+export function createTestDocument(projectId: string, path: string): string {
+  const docId = generateTestId();
+  const filename = path.split('/').pop() ?? path;
+  testRun(
+    `INSERT INTO documents (id, project_id, path, filename, status) VALUES (?, ?, ?, ?, 'tracked')`,
+    [docId, projectId, path, filename]
+  );
+  return docId;
+}
+
+/**
+ * Create a test chunk
+ */
+export function createTestChunk(
+  sessionId: string,
+  chunkId: string,
+  name: string,
+  assignedFiles?: string[]
+): string {
+  testRun(
+    `INSERT INTO chunks (id, session_id, name, assigned_files, review_mode) VALUES (?, ?, ?, ?, 'standard')`,
+    [chunkId, sessionId, name, assignedFiles ? JSON.stringify(assignedFiles) : null]
+  );
+  return chunkId;
 }
