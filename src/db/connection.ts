@@ -760,14 +760,41 @@ export function getUntaggedFiles(
     assignedOnly?: boolean;
   } = {}
 ): { path: string; document_id: string }[] {
-  // If assignedOnly and chunkId provided, only return untagged files that were assigned to that chunk
-  if (options.assignedOnly && options.chunkId) {
-    const chunk = getChunk(options.chunkId);
-    if (!chunk || !chunk.assigned_files) {
-      return [];
+  // If assignedOnly, only return untagged files that were assigned to chunks
+  if (options.assignedOnly) {
+    // Collect all assigned files from the specified chunk or all chunks in session
+    let assignedFiles: string[] = [];
+
+    if (options.chunkId) {
+      // Single chunk
+      const chunk = getChunk(options.chunkId);
+      if (chunk?.assigned_files) {
+        try {
+          assignedFiles = JSON.parse(chunk.assigned_files);
+        } catch {
+          // Invalid JSON, skip
+        }
+      }
+    } else {
+      // All chunks in this session
+      const chunks = getSessionChunks(sessionId);
+      for (const chunk of chunks) {
+        if (chunk.assigned_files) {
+          try {
+            const files = JSON.parse(chunk.assigned_files);
+            assignedFiles.push(...files);
+          } catch {
+            // Invalid JSON, skip
+          }
+        }
+      }
+      // Deduplicate
+      assignedFiles = [...new Set(assignedFiles)];
     }
 
-    const assignedFiles: string[] = JSON.parse(chunk.assigned_files);
+    if (assignedFiles.length === 0) {
+      return [];
+    }
 
     // Get documents for assigned files that haven't been tagged
     return queryAll<{ path: string; document_id: string }>(
