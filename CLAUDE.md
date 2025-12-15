@@ -1,4 +1,6 @@
-# AIGILE - Agile Project Management CLI
+# AIGILE - AI-First Agile System
+
+AI-first agile system for autonomous product development and project management. Works for any project type: software, research, content, business ops, personal projects.
 
 ## Quick Start
 
@@ -12,7 +14,7 @@ aigile status
 
 AIGILE is an **optional extension** to Claude Context Manager:
 - **CCM**: Manages Claude Code artifacts (skills, commands, agents)
-- **AIGILE**: Manages agile work items (epics, stories, tasks, bugs)
+- **AIGILE**: Manages agile work items and project context
 
 Both work independently or together.
 

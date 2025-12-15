@@ -1,16 +1,18 @@
 {
   "name": "@vladimir-ks/aigile",
-  "version": "0.2.5",
-  "description": "JIRA-compatible Agile project management CLI for AI-assisted development",
+  "version": "0.2.6",
+  "description": "AI-first agile system for autonomous product development and project management",
   "keywords": [
     "aigile",
     "agile",
-    "jira",
+    "ai-first",
+    "autonomous",
     "project-management",
-    "cli",
-    "typescript",
+    "product-development",
+    "ai-agents",
     "claude-code",
-    "ai-development"
+    "context-management",
+    "session-tracking"
   ],
   "author": {
     "name": "Vladimir K.S.",
